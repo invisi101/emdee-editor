@@ -308,6 +308,8 @@ class EmDeeWindow(Gtk.ApplicationWindow):
         if mode == 'split':
             self.editor_box.show()
             self.webview.show()
+            w = self.paned.get_allocated_width()
+            self.paned.set_position(w // 2)
         elif mode == 'edit':
             self.editor_box.show()
             self.webview.hide()
