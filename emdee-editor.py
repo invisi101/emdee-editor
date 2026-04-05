@@ -148,6 +148,11 @@ class EmDeeWindow(Gtk.ApplicationWindow):
         self._update_recent_menu()
 
         # Right buttons
+        self.toc_btn = Gtk.ToggleButton(label='TOC')
+        self.toc_btn.set_active(True)
+        self.toc_btn.connect('toggled', self._on_toc_toggled)
+        header.pack_end(self.toc_btn)
+
         zoom_out_btn = Gtk.Button(label='A\u2212')
         zoom_out_btn.connect('clicked', self._on_zoom_out)
         header.pack_end(zoom_out_btn)
@@ -316,6 +321,12 @@ class EmDeeWindow(Gtk.ApplicationWindow):
         elif mode == 'preview':
             self.editor_box.hide()
             self.webview.show()
+
+    def _on_toc_toggled(self, button):
+        if button.get_active():
+            self.toc_scroll.show()
+        else:
+            self.toc_scroll.hide()
 
     # ── File operations ─────────────────────────────────────────────
 
