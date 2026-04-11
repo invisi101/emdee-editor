@@ -117,6 +117,8 @@ class EmDeeWindow(Gtk.ApplicationWindow):
         self._setup_shortcuts()
         self._show_welcome()
         self.show_all()
+        self.toc_scroll.hide()
+        self.editor_box.hide()
 
     # ── Header ──────────────────────────────────────────────────────
 
@@ -149,7 +151,7 @@ class EmDeeWindow(Gtk.ApplicationWindow):
 
         # Right buttons
         self.toc_btn = Gtk.ToggleButton(label='TOC')
-        self.toc_btn.set_active(True)
+        self.toc_btn.set_active(False)
         self.toc_btn.connect('toggled', self._on_toc_toggled)
         header.pack_end(self.toc_btn)
 
@@ -167,8 +169,8 @@ class EmDeeWindow(Gtk.ApplicationWindow):
         self.btn_split = Gtk.ToggleButton(label='Split')
         self.btn_edit = Gtk.ToggleButton(label='Edit')
         self.btn_preview = Gtk.ToggleButton(label='View')
-        self.btn_split.set_active(True)
-        self._view_mode = 'split'
+        self.btn_preview.set_active(True)
+        self._view_mode = 'preview'
         self.btn_split.connect('toggled', self._on_view_toggle, 'split')
         self.btn_edit.connect('toggled', self._on_view_toggle, 'edit')
         self.btn_preview.connect('toggled', self._on_view_toggle, 'preview')
