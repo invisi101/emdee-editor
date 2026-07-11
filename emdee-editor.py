@@ -242,9 +242,22 @@ class EmDeeWindow(Gtk.ApplicationWindow):
         self.paned.pack2(self.webview, resize=True, shrink=False)
 
         main_box.pack_start(self.paned, True, True, 0)
-        self.add(main_box)
+
+        # Stack the search bar above the main content
+        outer = Gtk.Box(orientation=Gtk.Orientation.VERTICAL)
+        outer.pack_start(self._build_search(), False, False, 0)
+        outer.pack_start(main_box, True, True, 0)
+        self.add(outer)
 
         self._apply_gtk_theme(self.css)
+
+        # In-editor incremental search (highlights + next/prev)
+        self.search_settings = GtkSource.SearchSettings()
+        self.search_settings.set_wrap_around(True)
+        self.search_settings.set_case_sensitive(False)
+        self.search_context = GtkSource.SearchContext.new(
+            self.source_buffer, self.search_settings)
+        self.search_context.set_highlight(True)
 
         # Connect buffer change signal for live preview
         self.source_buffer.connect('changed', self._on_buffer_changed)
@@ -295,10 +308,150 @@ class EmDeeWindow(Gtk.ApplicationWindow):
             ('<Control>b', lambda *a: self._fmt_bold(None)),
             ('<Control>i', lambda *a: self._fmt_italic(None)),
             ('<Control>k', lambda *a: self._fmt_link(None)),
+            ('<Control>f', lambda *a: self._open_search()),
         ]
         for accel_str, callback in shortcuts:
             key, mods = Gtk.accelerator_parse(accel_str)
             accel.connect(key, mods, Gtk.AccelFlags.VISIBLE, callback)
+
+    # ── Search ──────────────────────────────────────────────────────
+
+    def _build_search(self):
+        self.search_bar = Gtk.SearchBar()
+
+        box = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=4)
+
+        self.search_entry = Gtk.SearchEntry()
+        self.search_entry.set_width_chars(32)
+        self.search_entry.set_placeholder_text('Search')
+        self.search_entry.connect('search-changed', self._on_search_changed)
+        self.search_entry.connect('activate', self._on_search_next)
+        self.search_entry.connect('stop-search', lambda e: self._close_search())
+        self.search_entry.connect('key-press-event', self._on_search_key)
+        box.pack_start(self.search_entry, False, False, 0)
+
+        prev_btn = Gtk.Button.new_from_icon_name('go-up-symbolic', Gtk.IconSize.BUTTON)
+        prev_btn.set_tooltip_text('Previous match (Shift+Enter)')
+        prev_btn.connect('clicked', self._on_search_prev)
+        box.pack_start(prev_btn, False, False, 0)
+
+        next_btn = Gtk.Button.new_from_icon_name('go-down-symbolic', Gtk.IconSize.BUTTON)
+        next_btn.set_tooltip_text('Next match (Enter)')
+        next_btn.connect('clicked', self._on_search_next)
+        box.pack_start(next_btn, False, False, 0)
+
+        self.search_label = Gtk.Label(label='')
+        self.search_label.set_margin_start(4)
+        box.pack_start(self.search_label, False, False, 0)
+
+        self.search_bar.add(box)
+        self.search_bar.connect_entry(self.search_entry)
+        return self.search_bar
+
+    def _open_search(self):
+        # Seed the box with the current selection, if any
+        buf = self.source_buffer
+        bounds = buf.get_selection_bounds()
+        if bounds and self._view_mode != 'preview':
+            self.search_entry.set_text(buf.get_text(bounds[0], bounds[1], True))
+        self.search_bar.set_search_mode(True)
+        self.search_entry.grab_focus()
+        if self.search_entry.get_text():
+            self._on_search_changed(self.search_entry)
+
+    def _close_search(self):
+        self.search_bar.set_search_mode(False)
+        self.search_settings.set_search_text(None)
+        self.webview.get_find_controller().search_finish()
+        self.search_label.set_text('')
+        if self._view_mode == 'preview':
+            self.webview.grab_focus()
+        else:
+            self.source_view.grab_focus()
+
+    def _on_search_key(self, entry, event):
+        if (event.keyval in (Gdk.KEY_Return, Gdk.KEY_KP_Enter)
+                and event.state & Gdk.ModifierType.SHIFT_MASK):
+            self._on_search_prev(entry)
+            return True
+        return False
+
+    def _on_search_changed(self, entry):
+        text = entry.get_text()
+        if self._view_mode == 'preview':
+            self._web_search(text)
+        else:
+            self.search_settings.set_search_text(text or None)
+            if text:
+                self._source_search(True, from_selection_start=True)
+        self._update_search_label()
+
+    def _on_search_next(self, widget):
+        if not self.search_entry.get_text():
+            return
+        if self._view_mode == 'preview':
+            self.webview.get_find_controller().search_next()
+        else:
+            self._source_search(True)
+        self._update_search_label()
+
+    def _on_search_prev(self, widget):
+        if not self.search_entry.get_text():
+            return
+        if self._view_mode == 'preview':
+            self.webview.get_find_controller().search_previous()
+        else:
+            self._source_search(False)
+        self._update_search_label()
+
+    def _source_search(self, forward, from_selection_start=False):
+        buf = self.source_buffer
+        bounds = buf.get_selection_bounds()
+        if bounds:
+            sel_start, sel_end = bounds
+        else:
+            cursor = buf.get_iter_at_mark(buf.get_insert())
+            sel_start = sel_end = cursor
+
+        if forward:
+            start_iter = sel_start if from_selection_start else sel_end
+            found, m_start, m_end, _ = self.search_context.forward2(start_iter)
+        else:
+            found, m_start, m_end, _ = self.search_context.backward2(sel_start)
+
+        if found:
+            buf.select_range(m_start, m_end)
+            self.source_view.scroll_to_iter(m_start, 0.2, False, 0, 0)
+
+    def _web_search(self, text):
+        fc = self.webview.get_find_controller()
+        if not text:
+            fc.search_finish()
+            return
+        options = (WebKit2.FindOptions.CASE_INSENSITIVE
+                   | WebKit2.FindOptions.WRAP_AROUND)
+        fc.search(text, options, 1000)
+
+    def _update_search_label(self):
+        if self._view_mode == 'preview':
+            self.search_label.set_text('')
+            return
+        count = self.search_context.get_occurrences_count()
+        if not self.search_entry.get_text():
+            self.search_label.set_text('')
+        elif count < 0:
+            self.search_label.set_text('')  # still scanning
+        elif count == 0:
+            self.search_label.set_text('No matches')
+        else:
+            bounds = self.source_buffer.get_selection_bounds()
+            pos = -1
+            if bounds:
+                pos = self.search_context.get_occurrence_position(bounds[0], bounds[1])
+            if pos > 0:
+                self.search_label.set_text(f'{pos} of {count}')
+            else:
+                self.search_label.set_text(f'{count} matches')
 
     # ── View mode ───────────────────────────────────────────────────
 
