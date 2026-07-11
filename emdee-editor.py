@@ -59,12 +59,18 @@ img { max-width: 100%; }
 """
 
 
+# Appended after whatever CSS is loaded so it overrides the theme's own
+# max-width. The Omarchy theme file caps the body at 800px; CSS later-rules win
+# at equal specificity, so this widens the view without editing the theme file.
+WIDTH_OVERRIDE = "\nbody { max-width: 1200px; }\n"
+
+
 def _load_css():
     try:
         with open(THEME_CSS_FILE, 'r') as f:
-            return f.read()
+            return f.read() + WIDTH_OVERRIDE
     except (FileNotFoundError, PermissionError, OSError):
-        return DARK_CSS
+        return DARK_CSS + WIDTH_OVERRIDE
 
 
 class EmDeeEditor(Gtk.Application):
